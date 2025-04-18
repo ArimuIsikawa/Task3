@@ -1,23 +1,110 @@
-﻿using System;
-using System.IO;
+﻿using System.IO;
+using System.Collections.Generic;
 using System.Text.RegularExpressions;
 
 namespace Task3
 {
-    internal class Program
+    public interface ILogParsed
     {
-        public const string Pattern1 = @"^(?<dd>\d{2})\.(?<mm>\d{2})\.(?<yyyy>\d{2,4})\s+" +
+       bool TryParse(string line, out LogEntry entry);
+    }
+
+    public class LogFormat1 : ILogParsed
+    {
+        public const string Pattern = @"^(?<dd>\d{2})\.(?<mm>\d{2})\.(?<yyyy>\d{2,4})\s+" +
                                        @"(?<time>\d{2}:\d{2}:\d{2}\.\d{1,4})\s+" +
                                        @"(?<logLevel>INFO|WARN|ERROR|DEBUG)\s*" +
                                        @"(?<message>.*)$";
+        public bool TryParse(string line, out LogEntry entry)
+        {
+            entry = null;
+            Regex rx = new Regex(Pattern);
+            Match match = rx.Match(line);
 
-        public const string Pattern2 = @"^(?<yyyy>\d{2,4})-(?<mm>\d{2})-(?<dd>\d{2})\s+" +
+            if (!match.Success)
+                return false;
+
+            entry = new LogEntry
+            {
+                Date = $"{match.Groups["yyyy"].Value}-{match.Groups["mm"].Value}-{match.Groups["dd"].Value}",
+                Time = match.Groups["time"].Value,
+                LogLevel = match.Groups["logLevel"].Value,
+                ErrorMethod = "DEFAULT",
+                Message = match.Groups["message"].Value
+            };
+            return true;
+        }
+    }
+
+    public class LogFormat2 : ILogParsed
+    {
+        public const string Pattern = @"^(?<yyyy>\d{2,4})-(?<mm>\d{2})-(?<dd>\d{2})\s+" +
                                        @"(?<time>\d{2}:\d{2}:\d{2}\.\d{1,4})\s*[\|]?\s*" +
                                        @"(?<logLevel>INFO|WARN|ERROR|DEBUG)\s*[\|]?\s*" +
                                        @"\d+\s*[\|]?\s*" +
                                        @"(?<errorMethod>(.*?)(?=\|))\s*[\|]?\s*" +
                                        @"(?<message>.*)$";
+        public bool TryParse(string line, out LogEntry entry)
+        {
+            entry = null;
+            Regex rx = new Regex(Pattern);
+            Match match = rx.Match(line);
 
+            if (!match.Success)
+                return false;
+
+            entry = new LogEntry
+            {
+                Date = $"{match.Groups["yyyy"].Value}-{match.Groups["mm"].Value}-{match.Groups["dd"].Value}",
+                Time = match.Groups["time"].Value,
+                LogLevel = match.Groups["logLevel"].Value,
+                ErrorMethod = match.Groups["errorMethod"].Value,
+                Message = match.Groups["message"].Value
+            };
+            return true;
+        }
+    }
+
+    public class LogEntry
+    {
+        public string Date { get; set; }
+        public string Time { get; set; }
+        public string LogLevel { get; set; }
+        public string ErrorMethod { get; set; }
+        public string Message { get; set; }
+
+        public override string ToString()
+        {
+            return $"{Date}\t{Time}\t{LogLevel}\t{ErrorMethod}\t{Message}";
+        }
+
+    }
+
+    public class LogProcessor
+    {
+        private readonly List<ILogParsed> _formats;
+        public LogProcessor(List<ILogParsed> Formats) 
+        {
+            _formats = Formats;
+        }
+
+        public bool TryProcessLine(string input, out string parsed)
+        {
+            for (int i = 0; i < _formats.Count; ++i)
+            {
+                if (_formats[i].TryParse(input, out LogEntry entry))
+                {
+                    parsed = entry.ToString();
+                    return true;
+                }
+            }
+            parsed = input;
+            return false;
+        }
+    }
+
+    internal class Program
+    {
         public static string SetupLine(string input)
         {
             while (input.IndexOf("INFORMATION") != -1)
@@ -33,38 +120,22 @@ namespace Task3
             StreamWriter outputFile = new StreamWriter("output.txt");
             StreamWriter problemFile = new StreamWriter("problems.txt");
 
-            Regex rx1 = new Regex(Pattern1);
-            Regex rx2 = new Regex(Pattern2);
+            List<ILogParsed> Formats = new List<ILogParsed>
+            {
+                new LogFormat1(),
+                new LogFormat2()
+            };
+
+            LogProcessor processor = new LogProcessor(Formats);
 
             while (!inputFile.EndOfStream)
             {
                 string input = SetupLine(inputFile.ReadLine());
-                Match match1 = rx1.Match(input);
-                if (match1.Success)
-                {
-                    string date = $"{match1.Groups["yyyy"].Value}-{match1.Groups["mm"].Value}-{match1.Groups["dd"].Value}";
-                    string time = match1.Groups["time"].Value;
-                    string logLevel = match1.Groups["logLevel"].Value;
-                    string message = match1.Groups["message"].Value;
-                    outputFile.WriteLine($"{date}\t{time,-13}\t{logLevel}\tDEFAULT\t{message}");
-                }
+
+                if (processor.TryProcessLine(input, out string processedLine))
+                    outputFile.WriteLine(processedLine);
                 else
-                {
-                    Match match2 = rx2.Match(input);
-                    if (match2.Success)
-                    {
-                        string date = $"{match2.Groups["yyyy"].Value}-{match2.Groups["mm"].Value}-{match2.Groups["dd"].Value}";
-                        string time = match2.Groups["time"].Value;
-                        string logLevel = match2.Groups["logLevel"].Value;
-                        string errorMethod = match2.Groups["errorMethod"].Value;
-                        string message = match2.Groups["message"].Value;
-                        outputFile.WriteLine($"{date}\t{time,-13}\t{logLevel}\t{errorMethod}\t{message}");
-                    }
-                    else
-                    {
-                        problemFile.WriteLine(input);
-                    }
-                }
+                    problemFile.WriteLine(processedLine);
             }
 
             inputFile.Close();
